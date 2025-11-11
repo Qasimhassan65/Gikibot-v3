@@ -1,7 +1,13 @@
 'use client';
 
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Fragment, useEffect, useRef, useState } from 'react';
+import {
+  Fragment,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+} from 'react';
 import type { ReactNode } from 'react';
 
 type Role = 'user' | 'assistant';
@@ -19,6 +25,14 @@ interface ChatMessage {
 }
 
 export default function ChatPage() {
+  return (
+    <Suspense fallback={<LoadingState />}>
+      <ChatPageContent />
+    </Suspense>
+  );
+}
+
+function ChatPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const typeParam = (searchParams.get('type') || 'undergrad').toLowerCase();
@@ -234,6 +248,18 @@ export default function ChatPage() {
             Send
           </button>
         </form>
+      </div>
+    </div>
+  );
+}
+
+function LoadingState() {
+  return (
+    <div className="page-root">
+      <div className="card chat-card">
+        <div className="chat-container">
+          <div className="message assistant">Loading chat…</div>
+        </div>
       </div>
     </div>
   );
