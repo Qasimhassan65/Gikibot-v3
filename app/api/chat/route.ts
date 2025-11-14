@@ -127,34 +127,50 @@ export async function POST(req: NextRequest) {
         ? GRAD_SYSTEM_INSTRUCTION
         : UG_SYSTEM_INSTRUCTION;
 
-    // Get the generative model
-    const model = ai.getGenerativeModel({
-      model: 'gemini-1.5-flash',
-      systemInstruction: systemInstruction,
-      tools: [
-        {
-          fileSearch: {
-            fileSearchStoreNames: [storeName],
-          },
-        },
-      ],
-    });
-
-    // Generate content
-    const result = await model.generateContent(message);
-    const response = result.response;
-
-    // Extract text from response - try the text() method first
-    let text = '';
+    let response;
     try {
-      if (typeof response.text === 'function') {
-        text = await response.text();
-      } else {
+      response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: message,
+        config: {
+          systemInstruction,
+          tools: [
+            {
+              fileSearch: {
+                fileSearchStoreNames: [storeName],
+              },
+            },
+          ],
+          temperature: 0.2,
+          topP: 0.8,
+          topK: 40,
+        },
+      });
+    } catch (apiError: any) {
+      console.error('Gemini API call failed:', apiError);
+      throw new Error(`Gemini API error: ${apiError?.message || 'Unknown error'}`);
+    }
+
+    // Handle response - try multiple ways to extract text
+    let text = '';
+    if (response) {
+      // Try direct text property
+      if (typeof (response as any).text === 'string') {
+        text = (response as any).text;
+      } 
+      // Try text() method if it's a function
+      else if (typeof (response as any).text === 'function') {
+        try {
+          text = await (response as any).text();
+        } catch (textError) {
+          console.error('Error calling response.text():', textError);
+        }
+      }
+      
+      // Fallback to extraction function
+      if (!text) {
         text = extractTextFromResponse(response);
       }
-    } catch (textError) {
-      console.error('Error extracting text:', textError);
-      text = extractTextFromResponse(response);
     }
 
     if (!text) {
