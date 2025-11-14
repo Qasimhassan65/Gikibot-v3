@@ -127,35 +127,25 @@ export async function POST(req: NextRequest) {
         ? GRAD_SYSTEM_INSTRUCTION
         : UG_SYSTEM_INSTRUCTION;
 
-    // Get the generative model with configuration
-    const model = ai.getGenerativeModel({
+    // Generate content using the original working API structure
+    const response = await ai!.models.generateContent({
       model: 'gemini-2.5-flash',
-      systemInstruction: systemInstruction,
-      tools: [
-        {
-          fileSearch: {
-            fileSearchStoreNames: [storeName],
+      contents: message,
+      config: {
+        systemInstruction,
+        tools: [
+          {
+            fileSearch: {
+              fileSearchStoreNames: [storeName],
+            },
           },
-        },
+        ],
+        temperature: 0.2,
+        topP: 0.8,
+        topK: 40,
       },
     });
 
-    let result;
-    let response;
-    try {
-      // Generate content
-      result = await model.generateContent(message);
-      response = result.response;
-    } catch (apiError: any) {
-      console.error('Gemini API call failed:', apiError);
-      console.error('API Error details:', {
-        message: apiError?.message,
-        code: apiError?.code,
-        status: apiError?.status,
-        stack: apiError?.stack,
-      });
-      throw new Error(`Gemini API error: ${apiError?.message || 'Unknown error'}`);
-    }
 
     // Extract text from response
     let text = '';
