@@ -49,21 +49,45 @@ async function getSheetsClient() {
 
 async function ensureSpreadsheetId(sheets: ReturnType<typeof google.sheets>): Promise<string> {
   if (cachedSpreadsheetId) {
-    return cachedSpreadsheetId;
+    // Verify the spreadsheet still exists and is accessible
+    try {
+      await sheets.spreadsheets.get({ spreadsheetId: cachedSpreadsheetId });
+      return cachedSpreadsheetId;
+    } catch (err: any) {
+      console.warn("Cached spreadsheet ID is no longer accessible, clearing cache:", err?.message);
+      cachedSpreadsheetId = '';
+    }
+  }
+
+  // Check environment variable first
+  if (ENV_SPREADSHEET_ID) {
+    try {
+      await sheets.spreadsheets.get({ spreadsheetId: ENV_SPREADSHEET_ID });
+      cachedSpreadsheetId = ENV_SPREADSHEET_ID;
+      return cachedSpreadsheetId;
+    } catch (err: any) {
+      console.error("Environment spreadsheet ID is not accessible:", err?.message);
+      // Continue to try cache or create new
+    }
   }
 
   try {
     const stored = await fs.readFile(SHEET_ID_CACHE_PATH, "utf8");
     const parsed = stored.trim();
     if (parsed) {
-      cachedSpreadsheetId = parsed;
-      return cachedSpreadsheetId;
+      try {
+        await sheets.spreadsheets.get({ spreadsheetId: parsed });
+        cachedSpreadsheetId = parsed;
+        return cachedSpreadsheetId;
+      } catch (err: any) {
+        console.warn("Cached spreadsheet ID from file is not accessible:", err?.message);
+      }
     }
   } catch (err) {
     // ignore missing file
   }
 
-  console.warn("GOOGLE_SHEETS_SPREADSHEET_ID is not set. Creating a fallback spreadsheet using the service account.");
+  console.warn("GOOGLE_SHEETS_SPREADSHEET_ID is not set or not accessible. Creating a fallback spreadsheet using the service account.");
 
   const created = await sheets.spreadsheets.create({
     requestBody: {
@@ -108,24 +132,15 @@ async function ensureSpreadsheetId(sheets: ReturnType<typeof google.sheets>): Pr
 }
 
 async function ensureSheetTab(sheets: ReturnType<typeof google.sheets>, spreadsheetId: string) {
-  try {
-    const details = await sheets.spreadsheets.get({
-      spreadsheetId,
-      includeGridData: false,
-    });
+  const details = await sheets.spreadsheets.get({
+    spreadsheetId,
+    includeGridData: false,
+  });
 
-    const hasTab = (details.data.sheets || []).some((sheet) => sheet.properties?.title === TAB_NAME);
+  const hasTab = (details.data.sheets || []).some((sheet) => sheet.properties?.title === TAB_NAME);
 
-    if (hasTab) {
-      return;
-    }
-  } catch (err: any) {
-    console.error('Error checking spreadsheet:', err);
-    // If spreadsheet doesn't exist or we don't have access, throw a clearer error
-    if (err?.code === 404 || err?.message?.includes('not found')) {
-      throw new Error(`Spreadsheet with ID ${spreadsheetId} not found. Please check GOOGLE_SHEETS_SPREADSHEET_ID and ensure the service account has access.`);
-    }
-    throw err;
+  if (hasTab) {
+    return;
   }
 
   await sheets.spreadsheets.batchUpdate({
@@ -181,22 +196,14 @@ export async function POST(req: NextRequest) {
     const spreadsheetId = await ensureSpreadsheetId(sheets);
     await ensureSheetTab(sheets, spreadsheetId);
 
-    try {
-      await sheets.spreadsheets.values.append({
-        spreadsheetId,
-        range: `${TAB_NAME}!A:H`,
-        valueInputOption: "USER_ENTERED",
-        requestBody: {
-          values: [[timestamp, feedbackType, userComment, lastQuestion, lastResponse, conversationString, sessionId, typeLabel]],
-        },
-      });
-    } catch (appendError: any) {
-      console.error('Error appending to spreadsheet:', appendError);
-      if (appendError?.code === 404 || appendError?.message?.includes('not found')) {
-        throw new Error(`Spreadsheet or sheet tab not found. Please verify GOOGLE_SHEETS_SPREADSHEET_ID (${spreadsheetId}) and GOOGLE_SHEETS_TAB_NAME (${TAB_NAME}) are correct, and the service account has access.`);
-      }
-      throw appendError;
-    }
+    await sheets.spreadsheets.values.append({
+      spreadsheetId,
+      range: `${TAB_NAME}!A:H`,
+      valueInputOption: "USER_ENTERED",
+      requestBody: {
+        values: [[timestamp, feedbackType, userComment, lastQuestion, lastResponse, conversationString, sessionId, typeLabel]],
+      },
+    });
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

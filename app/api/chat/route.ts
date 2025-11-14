@@ -127,10 +127,10 @@ export async function POST(req: NextRequest) {
         ? GRAD_SYSTEM_INSTRUCTION
         : UG_SYSTEM_INSTRUCTION;
 
-    // Generate content using the original working API structure
+    // Generate content using the API structure that works locally
     let response;
     try {
-      // Use models.generateContent as it works locally
+      // Use the models API as it works locally
       response = await (ai as any).models.generateContent({
         model: 'gemini-2.5-flash',
         contents: message,
