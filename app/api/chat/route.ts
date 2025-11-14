@@ -127,48 +127,55 @@ export async function POST(req: NextRequest) {
         ? GRAD_SYSTEM_INSTRUCTION
         : UG_SYSTEM_INSTRUCTION;
 
+    // Get the generative model with configuration
+    const model = ai.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      systemInstruction: systemInstruction,
+      tools: [
+        {
+          fileSearch: {
+            fileSearchStoreNames: [storeName],
+          },
+        },
+      },
+    });
+
+    let result;
     let response;
     try {
-      response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: message,
-        config: {
-          systemInstruction,
-          tools: [
-            {
-              fileSearch: {
-                fileSearchStoreNames: [storeName],
-              },
-            },
-          ],
-          temperature: 0.2,
-          topP: 0.8,
-          topK: 40,
-        },
-      });
+      // Generate content
+      result = await model.generateContent(message);
+      response = result.response;
     } catch (apiError: any) {
       console.error('Gemini API call failed:', apiError);
+      console.error('API Error details:', {
+        message: apiError?.message,
+        code: apiError?.code,
+        status: apiError?.status,
+        stack: apiError?.stack,
+      });
       throw new Error(`Gemini API error: ${apiError?.message || 'Unknown error'}`);
     }
 
-    // Handle response - try multiple ways to extract text
+    // Extract text from response
     let text = '';
     if (response) {
-      // Try direct text property
-      if (typeof (response as any).text === 'string') {
-        text = (response as any).text;
-      } 
-      // Try text() method if it's a function
-      else if (typeof (response as any).text === 'function') {
-        try {
-          text = await (response as any).text();
-        } catch (textError) {
-          console.error('Error calling response.text():', textError);
+      try {
+        // Try the text() method (most common in newer SDK versions)
+        if (typeof response.text === 'function') {
+          text = await response.text();
+        } 
+        // Try direct text property
+        else if (typeof response.text === 'string') {
+          text = response.text;
         }
-      }
-      
-      // Fallback to extraction function
-      if (!text) {
+        // Fallback to extraction function
+        else {
+          text = extractTextFromResponse(response);
+        }
+      } catch (textError: any) {
+        console.error('Error extracting text:', textError);
+        // Try fallback extraction
         text = extractTextFromResponse(response);
       }
     }
