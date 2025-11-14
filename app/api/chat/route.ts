@@ -168,13 +168,13 @@ export async function POST(req: NextRequest) {
         console.log('Response type:', typeof response);
         console.log('Response keys:', Object.keys(response || {}));
         
-        // Try the text() method (most common in newer SDK versions)
-        if (typeof response.text === 'function') {
-          text = await response.text();
-        } 
-        // Try direct text property
-        else if (typeof response.text === 'string') {
+        // Try direct text property (it's a getter, not a function)
+        if (typeof response.text === 'string') {
           text = response.text;
+        }
+        // Try accessing text as a property (getter)
+        else if (response.text !== undefined && response.text !== null) {
+          text = String(response.text);
         }
         // Fallback to extraction function
         else {
@@ -237,13 +237,12 @@ export async function POST(req: NextRequest) {
 function extractTextFromResponse(response: any): string {
   if (!response) return '';
   
-  // Try direct text access
+  // Try direct text access (it's a getter property, not a function)
   if (typeof response.text === 'string') return response.text;
   
-  // Try response.text() method (async method in newer SDK versions)
-  if (typeof response.text === 'function') {
-    // This would need to be awaited, but we'll handle it differently
-    return '';
+  // Try accessing text as a property (getter)
+  if (response.text !== undefined && response.text !== null) {
+    return String(response.text);
   }
 
   // Try candidates array
