@@ -108,15 +108,24 @@ async function ensureSpreadsheetId(sheets: ReturnType<typeof google.sheets>): Pr
 }
 
 async function ensureSheetTab(sheets: ReturnType<typeof google.sheets>, spreadsheetId: string) {
-  const details = await sheets.spreadsheets.get({
-    spreadsheetId,
-    includeGridData: false,
-  });
+  try {
+    const details = await sheets.spreadsheets.get({
+      spreadsheetId,
+      includeGridData: false,
+    });
 
-  const hasTab = (details.data.sheets || []).some((sheet) => sheet.properties?.title === TAB_NAME);
+    const hasTab = (details.data.sheets || []).some((sheet) => sheet.properties?.title === TAB_NAME);
 
-  if (hasTab) {
-    return;
+    if (hasTab) {
+      return;
+    }
+  } catch (err: any) {
+    console.error('Error checking spreadsheet:', err);
+    // If spreadsheet doesn't exist or we don't have access, throw a clearer error
+    if (err?.code === 404 || err?.message?.includes('not found')) {
+      throw new Error(`Spreadsheet with ID ${spreadsheetId} not found. Please check GOOGLE_SHEETS_SPREADSHEET_ID and ensure the service account has access.`);
+    }
+    throw err;
   }
 
   await sheets.spreadsheets.batchUpdate({
@@ -172,14 +181,22 @@ export async function POST(req: NextRequest) {
     const spreadsheetId = await ensureSpreadsheetId(sheets);
     await ensureSheetTab(sheets, spreadsheetId);
 
-    await sheets.spreadsheets.values.append({
-      spreadsheetId,
-      range: `${TAB_NAME}!A:H`,
-      valueInputOption: "USER_ENTERED",
-      requestBody: {
-        values: [[timestamp, feedbackType, userComment, lastQuestion, lastResponse, conversationString, sessionId, typeLabel]],
-      },
-    });
+    try {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: `${TAB_NAME}!A:H`,
+        valueInputOption: "USER_ENTERED",
+        requestBody: {
+          values: [[timestamp, feedbackType, userComment, lastQuestion, lastResponse, conversationString, sessionId, typeLabel]],
+        },
+      });
+    } catch (appendError: any) {
+      console.error('Error appending to spreadsheet:', appendError);
+      if (appendError?.code === 404 || appendError?.message?.includes('not found')) {
+        throw new Error(`Spreadsheet or sheet tab not found. Please verify GOOGLE_SHEETS_SPREADSHEET_ID (${spreadsheetId}) and GOOGLE_SHEETS_TAB_NAME (${TAB_NAME}) are correct, and the service account has access.`);
+      }
+      throw appendError;
+    }
 
     return NextResponse.json({ success: true });
   } catch (err: any) {

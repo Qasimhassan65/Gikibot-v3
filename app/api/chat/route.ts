@@ -130,7 +130,8 @@ export async function POST(req: NextRequest) {
     // Generate content using the original working API structure
     let response;
     try {
-      response = await ai!.models.generateContent({
+      // Use models.generateContent as it works locally
+      response = await (ai as any).models.generateContent({
         model: 'gemini-2.5-flash',
         contents: message,
         config: {
