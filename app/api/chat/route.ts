@@ -12,9 +12,11 @@ if (!UG_STORE || !GRAD_STORE) {
   console.warn('FILESTORE_UNDERGRAD or FILESTORE_GRAD is not set.');
 }
 
-const ai = new GoogleGenAI({
-  apiKey: GEMINI_API_KEY,
-});
+const ai = GEMINI_API_KEY
+  ? new GoogleGenAI({
+      apiKey: GEMINI_API_KEY,
+    })
+  : null;
 
 const UG_SYSTEM_INSTRUCTION = `
 You are the official-style assistant for **GIKI Undergraduate Admissions**.
@@ -85,6 +87,15 @@ Answering rules (very important):
 
 export async function POST(req: NextRequest) {
   try {
+    if (!GEMINI_API_KEY || !ai) {
+      return NextResponse.json(
+        {
+          error: 'GEMINI_API_KEY is not configured. Please set the environment variable.',
+        },
+        { status: 500 },
+      );
+    }
+
     const body = await req.json().catch(() => ({}));
     const message = (body.message || '').toString().trim();
     const type = (body.type || 'undergrad').toString().toLowerCase();
@@ -116,26 +127,35 @@ export async function POST(req: NextRequest) {
         ? GRAD_SYSTEM_INSTRUCTION
         : UG_SYSTEM_INSTRUCTION;
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: message,
-      config: {
-        systemInstruction,
-        tools: [
-          {
-            fileSearch: {
-              fileSearchStoreNames: [storeName],
-            },
+    // Get the generative model
+    const model = ai.getGenerativeModel({
+      model: 'gemini-1.5-flash',
+      systemInstruction: systemInstruction,
+      tools: [
+        {
+          fileSearch: {
+            fileSearchStoreNames: [storeName],
           },
-        ],
-        temperature: 0.2,
-        topP: 0.8,
-        topK: 40,
-      },
+        },
+      ],
     });
 
-    const text =
-      (response as any).text ?? extractTextFromResponse(response);
+    // Generate content
+    const result = await model.generateContent(message);
+    const response = result.response;
+
+    // Extract text from response - try the text() method first
+    let text = '';
+    try {
+      if (typeof response.text === 'function') {
+        text = await response.text();
+      } else {
+        text = extractTextFromResponse(response);
+      }
+    } catch (textError) {
+      console.error('Error extracting text:', textError);
+      text = extractTextFromResponse(response);
+    }
 
     if (!text) {
       return NextResponse.json(
@@ -155,11 +175,21 @@ export async function POST(req: NextRequest) {
     );
   } catch (err: any) {
     console.error('Error in /api/chat:', err);
+    console.error('Error stack:', err?.stack);
+    console.error('Error details:', {
+      message: err?.message,
+      name: err?.name,
+      code: err?.code,
+    });
+    
+    // Don't expose internal error details to client in production
+    const errorMessage = err?.message || 'Unknown error';
+    
     return NextResponse.json(
       {
-        error:
-          'Sorry, I encountered an error while processing your request.',
-        details: err?.message || 'Unknown error',
+        error: 'Sorry, I encountered an error while processing your request.',
+        // Only include details in development
+        ...(process.env.NODE_ENV === 'development' && { details: errorMessage }),
       },
       { status: 500 },
     );
@@ -170,22 +200,47 @@ export async function POST(req: NextRequest) {
 
 function extractTextFromResponse(response: any): string {
   if (!response) return '';
+  
+  // Try direct text access
   if (typeof response.text === 'string') return response.text;
+  
+  // Try response.text() method (async method in newer SDK versions)
+  if (typeof response.text === 'function') {
+    // This would need to be awaited, but we'll handle it differently
+    return '';
+  }
 
+  // Try candidates array
   const candidates = response.candidates || [];
   const parts: string[] = [];
 
   for (const c of candidates) {
     const content = c.content;
-    if (!content?.parts) continue;
-    for (const p of content.parts) {
-      if (typeof p.text === 'string') {
-        parts.push(p.text);
+    if (!content) continue;
+    
+    // Try parts array
+    if (content.parts) {
+      for (const p of content.parts) {
+        if (typeof p.text === 'string') {
+          parts.push(p.text);
+        }
       }
+    }
+    
+    // Try direct text in content
+    if (typeof content.text === 'string') {
+      parts.push(content.text);
     }
   }
 
-  return parts.join('\n').trim();
+  const extracted = parts.join('\n').trim();
+  
+  // If still no text, try to get text from response directly
+  if (!extracted && response.text) {
+    return String(response.text);
+  }
+  
+  return extracted;
 }
 
 /**
