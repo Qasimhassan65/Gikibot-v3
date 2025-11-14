@@ -128,29 +128,46 @@ export async function POST(req: NextRequest) {
         : UG_SYSTEM_INSTRUCTION;
 
     // Generate content using the original working API structure
-    const response = await ai!.models.generateContent({
-      model: 'gemini-2.5-flash',
-      contents: message,
-      config: {
-        systemInstruction,
-        tools: [
-          {
-            fileSearch: {
-              fileSearchStoreNames: [storeName],
+    let response;
+    try {
+      response = await ai!.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: message,
+        config: {
+          systemInstruction,
+          tools: [
+            {
+              fileSearch: {
+                fileSearchStoreNames: [storeName],
+              },
             },
-          },
-        ],
-        temperature: 0.2,
-        topP: 0.8,
-        topK: 40,
-      },
-    });
+          ],
+          temperature: 0.2,
+          topP: 0.8,
+          topK: 40,
+        },
+      });
+    } catch (apiError: any) {
+      console.error('Gemini API call failed:', apiError);
+      console.error('API Error details:', {
+        message: apiError?.message,
+        code: apiError?.code,
+        status: apiError?.status,
+        name: apiError?.name,
+        stack: apiError?.stack?.substring(0, 500),
+      });
+      throw new Error(`Gemini API error: ${apiError?.message || 'Unknown error'}`);
+    }
 
 
     // Extract text from response
     let text = '';
     if (response) {
       try {
+        // Log response structure for debugging (only in production to help diagnose)
+        console.log('Response type:', typeof response);
+        console.log('Response keys:', Object.keys(response || {}));
+        
         // Try the text() method (most common in newer SDK versions)
         if (typeof response.text === 'function') {
           text = await response.text();
@@ -163,14 +180,20 @@ export async function POST(req: NextRequest) {
         else {
           text = extractTextFromResponse(response);
         }
+        
+        console.log('Extracted text length:', text?.length || 0);
       } catch (textError: any) {
         console.error('Error extracting text:', textError);
+        console.error('Response structure:', JSON.stringify(response, null, 2).substring(0, 500));
         // Try fallback extraction
         text = extractTextFromResponse(response);
       }
+    } else {
+      console.error('Response is null or undefined');
     }
 
     if (!text) {
+      console.error('No text extracted from response. Response:', JSON.stringify(response, null, 2).substring(0, 1000));
       return NextResponse.json(
         {
           error:
