@@ -186,3 +186,108 @@ body {
   opacity: 0.5;
   cursor: default;
 }
+
+.feedback-section {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feedback-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: #555555;
+}
+
+.feedback-label {
+  font-weight: 600;
+  color: #444444;
+}
+
+.feedback-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 8px;
+  border: 1px solid #d4d4d4;
+  background-color: #ffffff;
+  color: #333333;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.feedback-button:hover:not(:disabled) {
+  background-color: #f2f2f2;
+  border-color: #bcbcbc;
+}
+
+.feedback-button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.feedback-comment {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: #555555;
+}
+
+.feedback-comment label {
+  font-weight: 500;
+}
+
+.feedback-comment textarea {
+  width: 100%;
+  min-height: 60px;
+  max-height: 180px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid #d4d4d4;
+  font-size: 12px;
+  resize: vertical;
+  background-color: #ffffff;
+  color: #111111;
+}
+
+.feedback-comment textarea:focus {
+  outline: none;
+  border-color: #111111;
+}
+
+.feedback-submit {
+  align-self: flex-start;
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: none;
+  background-color: #111111;
+  color: #ffffff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.feedback-submit:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.feedback-status {
+  font-size: 11px;
+  color: #1b6d00;
+  font-weight: 600;
+}
+
+.feedback-error {
+  font-size: 11px;
+  color: #c62828;
+  font-weight: 500;
+}

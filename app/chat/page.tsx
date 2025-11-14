@@ -11,6 +11,7 @@ import {
 import type { ReactNode } from 'react';
 
 type Role = 'user' | 'assistant';
+type FeedbackStatus = 'positive' | 'negative';
 
 interface Citation {
   title: string;
@@ -22,6 +23,21 @@ interface ChatMessage {
   role: Role;
   content: string;
   citations?: Citation[];
+  timestamp: string;
+  feedback?: MessageFeedback;
+}
+
+interface MessageFeedback {
+  status: FeedbackStatus;
+  comment?: string;
+  submittedAt: string;
+}
+
+interface FeedbackUIState {
+  comment: string;
+  isCommentOpen: boolean;
+  loading: boolean;
+  error?: string;
 }
 
 export default function ChatPage() {
@@ -37,11 +53,18 @@ function ChatPageContent() {
   const router = useRouter();
   const typeParam = (searchParams.get('type') || 'undergrad').toLowerCase();
   const routeType = typeParam === 'grad' ? 'grad' : 'undergrad';
+  const friendlyTypeName =
+    routeType === 'undergrad'
+      ? 'Undergraduate Admissions'
+      : 'Graduate Admissions';
 
   const formRef = useRef<HTMLFormElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const sessionIdRef = useRef<string>(
+    `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  );
 
-  const [messages, setMessages] = useState<ChatMessage[]>([
+  const [messages, setMessages] = useState<ChatMessage[]>(() => [
     {
       id: 1,
       role: 'assistant',
@@ -49,10 +72,14 @@ function ChatPageContent() {
         routeType === 'undergrad'
           ? 'You are now chatting with the GIKI Undergraduate Admissions assistant. Ask me anything about eligibility, test, deadlines, fees, etc.'
           : 'You are now chatting with the GIKI Graduate Admissions assistant. Ask me anything about MS/PhD requirements, tests, policies, etc.',
+      timestamp: new Date().toISOString(),
     },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [feedbackUI, setFeedbackUI] = useState<Record<number, FeedbackUIState>>(
+    {},
+  );
 
   useEffect(() => {
     adjustTextareaHeight(textareaRef.current);
@@ -67,6 +94,7 @@ function ChatPageContent() {
       id: Date.now(),
       role: 'user',
       content: trimmed,
+      timestamp: new Date().toISOString(),
     };
 
     setMessages((prev) => [...prev, userMessage]);
@@ -99,6 +127,7 @@ function ChatPageContent() {
         citations: Array.isArray(data.citations)
           ? data.citations
           : [],
+        timestamp: new Date().toISOString(),
       };
 
       setMessages((prev) => [...prev, assistantMessage]);
@@ -109,6 +138,7 @@ function ChatPageContent() {
         role: 'assistant',
         content:
           'Sorry, there was an error talking to the admissions assistant. Please try again.',
+        timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, assistantMessage]);
     } finally {
@@ -131,6 +161,196 @@ function ChatPageContent() {
 
   const handleBack = () => {
     router.push('/');
+  };
+
+  const openNegativeFeedback = (messageId: number) => {
+    const target = messages.find((m) => m.id === messageId);
+    if (!target || target.feedback) {
+      return;
+    }
+
+    setFeedbackUI((prev) => {
+      const existing = prev[messageId] || {
+        comment: '',
+        isCommentOpen: false,
+        loading: false,
+      };
+
+      return {
+        ...prev,
+        [messageId]: {
+          ...existing,
+          isCommentOpen: true,
+          error: undefined,
+        },
+      };
+    });
+  };
+
+  const handleCommentChange = (messageId: number, value: string) => {
+    setFeedbackUI((prev) => {
+      const existing = prev[messageId] || {
+        comment: '',
+        isCommentOpen: true,
+        loading: false,
+      };
+
+      return {
+        ...prev,
+        [messageId]: {
+          ...existing,
+          comment: value,
+          error: undefined,
+        },
+      };
+    });
+  };
+
+  const submitNegativeFeedback = (messageId: number) => {
+    const existing = feedbackUI[messageId];
+    const comment = (existing?.comment || '').trim();
+
+    if (!comment) {
+      setFeedbackUI((prev) => {
+        const state = prev[messageId] || {
+          comment: '',
+          isCommentOpen: true,
+          loading: false,
+        };
+
+        return {
+          ...prev,
+          [messageId]: {
+            ...state,
+            error: 'Please share how we can improve this response.',
+          },
+        };
+      });
+      return;
+    }
+
+    void sendFeedback(messageId, 'negative', comment);
+  };
+
+  const handlePositiveFeedback = (messageId: number) => {
+    void sendFeedback(messageId, 'positive');
+  };
+
+  const sendFeedback = async (
+    messageId: number,
+    feedbackType: FeedbackStatus,
+    comment?: string,
+  ) => {
+    const targetMessage = messages.find((m) => m.id === messageId);
+    if (!targetMessage || targetMessage.feedback) {
+      return;
+    }
+
+    setFeedbackUI((prev) => {
+      const existing = prev[messageId] || {
+        comment: '',
+        isCommentOpen: feedbackType === 'negative',
+        loading: false,
+      };
+
+      return {
+        ...prev,
+        [messageId]: {
+          ...existing,
+          comment:
+            feedbackType === 'negative'
+              ? comment ?? existing.comment ?? ''
+              : existing.comment ?? '',
+          isCommentOpen: feedbackType === 'negative',
+          loading: true,
+          error: undefined,
+        },
+      };
+    });
+
+    const targetIndex = messages.findIndex((m) => m.id === messageId);
+    const lastUserMessage =
+      targetIndex > -1
+        ? [...messages.slice(0, targetIndex)]
+            .reverse()
+            .find((m) => m.role === 'user')
+        : undefined;
+
+    const conversationPayload = messages.map((m) => ({
+      role: m.role === 'assistant' ? 'bot' : 'user',
+      message: m.content,
+      timestamp: m.timestamp,
+    }));
+
+    try {
+      const res = await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timestamp: new Date().toISOString(),
+          feedbackType,
+          userComment: comment || '',
+          lastQuestion: lastUserMessage?.content || '',
+          lastResponse: targetMessage.content,
+          fullConversation: conversationPayload,
+          sessionId: sessionIdRef.current,
+          type: friendlyTypeName,
+          admissionsType: routeType,
+        }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json().catch(() => ({}));
+        throw new Error(error.error || 'Failed to submit feedback.');
+      }
+
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === messageId
+            ? {
+                ...m,
+                feedback: {
+                  status: feedbackType,
+                  comment: comment || '',
+                  submittedAt: new Date().toISOString(),
+                },
+              }
+            : m,
+        ),
+      );
+
+      setFeedbackUI((prev) => ({
+        ...prev,
+        [messageId]: {
+          comment: '',
+          isCommentOpen: false,
+          loading: false,
+          error: undefined,
+        },
+      }));
+    } catch (err: any) {
+      console.error('Feedback error:', err);
+      setFeedbackUI((prev) => {
+        const existing = prev[messageId] || {
+          comment: comment || '',
+          isCommentOpen: feedbackType === 'negative',
+          loading: false,
+        };
+
+        return {
+          ...prev,
+          [messageId]: {
+            ...existing,
+            comment: comment || existing.comment,
+            isCommentOpen: feedbackType === 'negative',
+            loading: false,
+            error:
+              err?.message ||
+              'Unable to send feedback right now. Please try again.',
+          },
+        };
+      });
+    }
   };
 
   return (
@@ -215,6 +435,80 @@ function ChatPageContent() {
                     </ul>
                   </div>
                 )}
+
+              {m.role === 'assistant' && (
+                <div className="feedback-section">
+                  {m.feedback ? (
+                    <div className="feedback-status">
+                      {m.feedback.status === 'positive'
+                        ? 'Thanks for letting us know this was helpful!'
+                        : 'Thanks for your feedback—we will use it to improve.'}
+                    </div>
+                  ) : (
+                    <>
+                      <div className="feedback-row">
+                        <span className="feedback-label">Was this helpful?</span>
+                        <button
+                          type="button"
+                          className="feedback-button"
+                          onClick={() => handlePositiveFeedback(m.id)}
+                          disabled={
+                            feedbackUI[m.id]?.loading || Boolean(m.feedback)
+                          }
+                        >
+                          {feedbackUI[m.id]?.loading &&
+                          !feedbackUI[m.id]?.isCommentOpen
+                            ? 'Sending...'
+                            : '👍 Yes'}
+                        </button>
+                        <button
+                          type="button"
+                          className="feedback-button"
+                          onClick={() => openNegativeFeedback(m.id)}
+                          disabled={
+                            feedbackUI[m.id]?.loading || Boolean(m.feedback)
+                          }
+                        >
+                          👎 No
+                        </button>
+                      </div>
+
+                      {feedbackUI[m.id]?.isCommentOpen && (
+                        <div className="feedback-comment">
+                          <label htmlFor={`feedback-${m.id}`}>
+                            How can we improve this response?
+                          </label>
+                          <textarea
+                            id={`feedback-${m.id}`}
+                            value={feedbackUI[m.id]?.comment || ''}
+                            onChange={(event) =>
+                              handleCommentChange(m.id, event.target.value)
+                            }
+                            placeholder="Share what was missing, unclear, or incorrect..."
+                            disabled={feedbackUI[m.id]?.loading}
+                          />
+                          <button
+                            type="button"
+                            className="feedback-submit"
+                            onClick={() => submitNegativeFeedback(m.id)}
+                            disabled={feedbackUI[m.id]?.loading}
+                          >
+                            {feedbackUI[m.id]?.loading
+                              ? 'Sending...'
+                              : 'Send feedback'}
+                          </button>
+                        </div>
+                      )}
+
+                      {feedbackUI[m.id]?.error && (
+                        <div className="feedback-error">
+                          {feedbackUI[m.id]?.error}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
             </div>
           ))}
 
